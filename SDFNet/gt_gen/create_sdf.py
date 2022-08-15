@@ -229,9 +229,6 @@ def create_h5_sdf_pt(
     )
     f1.close()
 
-    with h5py.File(h5_file, "r") as in_file:
-        print([k for k in in_file.keys()])
-
     command_str = "rm -rf " + norm_obj_file
     os.system(command_str)
     command_str = "rm -rf " + sdf_file
