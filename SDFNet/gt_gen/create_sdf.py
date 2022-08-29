@@ -1,6 +1,8 @@
+import os
+
+os.environ["PYOPENGL_PLATFORM"] = "egl"
 import pymesh
 import h5py
-import os
 import numpy as np
 from joblib import Parallel, delayed
 import trimesh
@@ -9,7 +11,6 @@ import time
 import argparse
 import json
 import constant
-
 
 from mesh_to_sdf import get_surface_point_cloud
 
@@ -29,12 +30,12 @@ parser.add_argument(
 parser.add_argument(
     "--categories",
     type=str,
-    default="shapenet_13",
+    default="shapenet_55",
     help="Short-handed categories to generate ground-truth",
 )
 
 parser.add_argument(
-    "--num_samples", type=int, default=32768, help="Number of sdf sampled"
+    "--num_samples", type=int, default=150000, help="Number of sdf sampled"
 )
 parser.add_argument(
     "--bandwidth", type=float, default=0.1, help="Bandwidth of sampling"
@@ -211,11 +212,6 @@ def create_h5_sdf_pt(
     # free_pcd.colors = o3d.utility.Vector3dVector(colors)
     # o3d.visualization.draw_geometries([free_pcd, pcd])
 
-    # sdf_dict = get_sdf(sdf_file, sdf_res)
-    # ori_verts = np.asarray([0.0, 0.0, 0.0], dtype=np.float32).reshape((1, 3))
-    # samplesdf = sample_sdf(cat_id, num_sample, bandwidth, iso_val, sdf_dict, sdf_res)
-    # norm_params = np.concatenate((centroid, np.asarray([m]).astype(np.float32)))
-
     f1 = h5py.File(h5_file, "w")
     f1.create_dataset(
         "free_pts",
@@ -229,6 +225,54 @@ def create_h5_sdf_pt(
     )
     f1.close()
 
+    # sdf_dict = get_sdf(sdf_file, sdf_res)
+    # ori_verts = np.asarray([0.0, 0.0, 0.0], dtype=np.float32).reshape((1, 3))
+    # samplesdf = sample_sdf(cat_id, num_sample, bandwidth, iso_val, sdf_dict, sdf_res)
+    # norm_params = np.concatenate((centroid, np.asarray([m]).astype(np.float32)))
+
+    # # Append to sdf_file
+    # with h5py.File(h5_file, "r") as hf:
+    # K = hf["K"][:]
+    # category = hf["category"][...]
+    # image = hf["image"][:]
+    # depth = hf["depth"][:]
+    # instance_name = hf["instance_name"][...]
+    # mask = hf["mask"][:]
+    # normal = hf["normal"][:]
+    # sdf = samplesdf
+    # w2c = hf["w2c"][:]
+
+    # with h5py.File(h5_file, "w") as out_file:
+    # out_file.create_dataset("K", data=K, dtype="f")
+    # out_file.create_dataset("category", data=category)
+    # out_file.create_dataset("instance_name", data=instance_name)
+    # out_file.create_dataset("image", data=image, compression="gzip", dtype="f")
+    # out_file.create_dataset("depth", data=depth, compression="gzip", dtype="f")
+    # out_file.create_dataset("normal", data=normal, compression="gzip", dtype="f")
+    # out_file.create_dataset("mask", data=mask, compression="gzip", dtype="f")
+    # out_file.create_dataset("sdf", data=sdf, compression="gzip", dtype="f")
+    # out_file.create_dataset("w2c", data=w2c, compression="gzip", dtype="f")
+
+    # f1 = h5py.File(h5_file, "w")
+    # f1.create_dataset(
+    # "pc_sdf_original",
+    # data=ori_verts.astype(np.float32),
+    # compression="gzip",
+    # compression_opts=4,
+    # )
+    # f1.create_dataset(
+    # "pc_sdf_sample",
+    # data=samplesdf.astype(np.float32),
+    # compression="gzip",
+    # compression_opts=4,
+    # )
+    # f1.create_dataset(
+    # "norm_params", data=norm_params, compression="gzip", compression_opts=4
+    # )
+    # f1.create_dataset(
+    # "sdf_params", data=sdf_dict["param"], compression="gzip", compression_opts=4
+    # )
+    # f1.close()
     command_str = "rm -rf " + norm_obj_file
     os.system(command_str)
     command_str = "rm -rf " + sdf_file
@@ -331,7 +375,14 @@ def create_sdf_obj(
         os.makedirs(norm_mesh_sub_dir)
     sdf_file = os.path.join(sdf_sub_dir, "isosurf.sdf")
     cube_obj_file = os.path.join(norm_mesh_sub_dir, "isosurf.obj")
-    h5_file = os.path.join(sdf_sub_dir, "ori_sample.h5")
+    h5_file = os.path.join(sdf_sub_dir, os.path.basename(sdf_sub_dir) + ".h5")
+
+    # if os.path.exists(h5_file):
+    # with h5py.File(h5_file, "r") as in_file:
+    # num_points = 0
+    # if "sdf" in in_file.keys():
+    # num_points = in_file["sdf"][:].shape[0]
+
     if ish5 and os.path.exists(h5_file) and skip_all_exist:
         print("skip existed: ", h5_file)
     elif not ish5 and os.path.exists(sdf_file):
@@ -448,7 +499,10 @@ def create_sdf(
         for md in mode:
             with open(json_path, "r") as json_file:
                 split = json.load(json_file)
-                list_obj = split[md][cat_id]
+                if cat_id in split[md]:
+                    list_obj = split[md][cat_id]
+                else:
+                    continue
 
             repeat = len(list_obj)
             indx_lst = [i for i in range(start, start + repeat)]
@@ -535,6 +589,8 @@ if __name__ == "__main__":
         cats = constant.shapenet_55
     elif categories == "shapenet_plane":
         cats = ["02691156"]
+    elif categories == "shapenet_cars":
+        cats = constant.shapenet_car
     else:
         raise Exception("Please implement customed categories here")
 
