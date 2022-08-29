@@ -1,6 +1,4 @@
 import os
-
-os.environ["PYOPENGL_PLATFORM"] = "egl"
 import pymesh
 import h5py
 import numpy as np
@@ -290,6 +288,7 @@ def get_normalize_mesh(model_file, norm_mesh_sub_dir):
         mesh = trimesh.load(model_file)
     except Exception:
         return None, None, None
+    mesh = trimesh.Trimesh(mesh.vertices, mesh.faces)
     bbox = mesh.bounding_box.bounds
     extents = mesh.extents
     # Compute location and scale
