@@ -116,4 +116,4 @@ shapenet_55 = [
 ]
 shapenet_plane = ["02691156"]
 # shapenet_car= ["02958343", "03001627", "04379243"]
-shapenet_car = ["02958343"]
+shapenet_car = ["03001627"]

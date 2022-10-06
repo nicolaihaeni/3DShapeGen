@@ -1,5 +1,4 @@
 import os
-import pymesh
 import h5py
 import numpy as np
 from joblib import Parallel, delayed
@@ -10,7 +9,10 @@ import argparse
 import json
 import constant
 
+from mesh_to_sdf.utils import scale_to_unit_sphere
 from mesh_to_sdf import get_surface_point_cloud
+from dgl.geometry import farthest_point_sampler
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--mesh_dir", type=str, default=".", help="Orginal mesh directory")
@@ -19,6 +21,8 @@ parser.add_argument(
 )
 parser.add_argument("--sdf_dir", type=str, default=".", help="Directory to save sdf")
 parser.add_argument("--json_path", type=str, default=".", help="Path to json file")
+parser.add_argument("--rank", type=int, default=0, help="rank of the process")
+parser.add_argument("--num_procs", type=int, default=1, help="number of processes")
 parser.add_argument(
     "--mode",
     type=str,
@@ -180,18 +184,23 @@ def create_h5_sdf_pt(
         m: scale of original mesh
         sdf_res: grid resolution
     """
-    bounding_radius = 1.1
     iso_mesh = trimesh.load(cube_obj_file)
-    ptcld = get_surface_point_cloud(iso_mesh, bounding_radius=bounding_radius)
-    surface_pts = ptcld.get_random_surface_points(count=250000)
-    free_pts = np.random.uniform(-bounding_radius, bounding_radius, (250000, 3))
+    iso_mesh = scale_to_unit_sphere(iso_mesh)
+    bounding_radius = np.max(np.linalg.norm(iso_mesh.vertices, axis=1)) * 1.1
 
-    surface_sdf, surface_normals = ptcld.get_sdf(surface_pts, return_gradients=True)
-    free_pts_sdf = ptcld.get_sdf(free_pts)
-    surface_data = np.concatenate(
-        [surface_pts, surface_normals, surface_sdf[:, None]], axis=-1
+    ptcld = get_surface_point_cloud(iso_mesh, "scan", bounding_radius=bounding_radius)
+
+    surface_pts, surface_normals = ptcld.get_random_surface_points(count=500000)
+    free_pts = np.random.uniform(-bounding_radius, bounding_radius, (500000, 3))
+    free_points_sdf = ptcld.get_sdf_in_batches(
+        free_points, use_depth_buffer=True, sample_count=10000000
     )
-    free_data = np.concatenate([free_pts, free_pts_sdf[:, None]], axis=-1)
+
+    surface_data = np.concatenate([surface_points, surface_normals], axis=-1)
+    free_data = np.concatenate([free_points, free_points_sdf[:, None]], axis=-1)
+
+    pt_idx = farthest_point_sampler(torch.tensor(surface_pts).unsqueeze(0).cuda(), 1024)
+    fps = surface_pts[pt_idx.squeeze(0).cpu().numpy()]
 
     # import open3d as o3d
 
@@ -219,6 +228,11 @@ def create_h5_sdf_pt(
     f1.create_dataset(
         "surface_pts",
         data=surface_data,
+        compression="gzip",
+    )
+    f1.create_dataset(
+        "fps",
+        data=fps,
         compression="gzip",
     )
     f1.close()
@@ -285,7 +299,7 @@ def get_normalize_mesh(model_file, norm_mesh_sub_dir):
         norm_mesh_sub_dir: path to normalized mesh
     """
     try:
-        mesh = trimesh.load(model_file)
+        mesh = trimesh.load(model_file, force="mesh")
     except Exception:
         return None, None, None
     mesh = trimesh.Trimesh(mesh.vertices, mesh.faces)
@@ -376,12 +390,6 @@ def create_sdf_obj(
     cube_obj_file = os.path.join(norm_mesh_sub_dir, "isosurf.obj")
     h5_file = os.path.join(sdf_sub_dir, os.path.basename(sdf_sub_dir) + ".h5")
 
-    # if os.path.exists(h5_file):
-    # with h5py.File(h5_file, "r") as in_file:
-    # num_points = 0
-    # if "sdf" in in_file.keys():
-    # num_points = in_file["sdf"][:].shape[0]
-
     if ish5 and os.path.exists(h5_file) and skip_all_exist:
         print("skip existed: ", h5_file)
     elif not ish5 and os.path.exists(sdf_file):
@@ -454,6 +462,8 @@ def create_sdf(
     sdf_dir=".",
     json_path=".",
     mode=None,
+    rank=0,
+    num_procs=1,
 ):
     """
     This function creates sdf values and iso meshes.
@@ -502,6 +512,8 @@ def create_sdf(
                     list_obj = split[md][cat_id]
                 else:
                     continue
+
+            list_obj = np.array_split(list_obj, num_procs)[rank]
 
             repeat = len(list_obj)
             indx_lst = [i for i in range(start, start + repeat)]
@@ -621,6 +633,8 @@ if __name__ == "__main__":
         sdf_dir=sdf_dir,
         json_path=json_path,
         mode=mode,
+        rank=args.rank,
+        num_procs=args.num_procs,
     )
     if ptcl:
         print("Generating pointcloud")
